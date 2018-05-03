@@ -16,6 +16,12 @@ public class AnotherActivity extends AppCompatActivity {
     private ArrayList<ItemRow> items;
 
     @Override
+    public void finish() {
+        super.finish();
+        overridePendingTransition(0, 0);
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         this.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -27,7 +33,7 @@ public class AnotherActivity extends AppCompatActivity {
         DividerItemDecoration dividerItemDecoration = new DividerItemDecoration(this, layoutManager.getOrientation());
         recyclerView.addItemDecoration(dividerItemDecoration);
         items = new ArrayList<>();
-        for (int i = 0; i < 15; i ++) {
+        for (int i = 0; i < 30; i ++) {
             items.add(new ItemRow("" + (i + 1)));
         }
         final MyAdapter myAdapter = new MyAdapter(items,this);

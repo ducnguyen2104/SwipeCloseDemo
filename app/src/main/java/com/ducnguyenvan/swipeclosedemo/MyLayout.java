@@ -1,17 +1,19 @@
 package com.ducnguyenvan.swipeclosedemo;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.content.Context;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
-import android.support.v4.view.MotionEventCompat;
-import android.support.v4.view.ViewConfigurationCompat;
 import android.support.v7.widget.RecyclerView;
 import android.util.AttributeSet;
-import android.util.Log;
 import android.view.MotionEvent;
 import android.view.VelocityTracker;
+import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
 public class MyLayout extends FrameLayout {
@@ -25,8 +27,6 @@ public class MyLayout extends FrameLayout {
     private float mLastMotionY;
     private float deltaX;
     private float deltaY;
-    private int mActivePointerId; //= INVALID_POINTER;
-    private static final int INVALID_POINTER = -1;
     private static final int MIN_DISTANCE_FOR_FLING = 50;
     private VelocityTracker mVelocityTracker;
     float xVelocity;
@@ -36,35 +36,57 @@ public class MyLayout extends FrameLayout {
     private boolean mIsBeingDraggedX;
     private boolean mIsBeingDraggedY;
     private int mTouchSlop;
-    //private TextView txt ;
+    private int mSwipingSlopX;
+    private int mSwipingSlopY;
     private RecyclerView recyclerView;
-    //private ScrollView scrollView;
+    private View mChildView;
     private Context context;
+    private View mBackgroundView;
+    private int mViewWidth = 1;
+    private int mViewHeight = 1;
+    private boolean mAnimationRunning = false;
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
-        //txt = (TextView)findViewById(R.id.txt);
-        recyclerView = (RecyclerView)findViewById(R.id.recycler_view);
-        //scrollView = (ScrollView)findViewById(R.id.scrollView);
-        //scrollView.requestDisallowInterceptTouchEvent(true);
+        recyclerView = (RecyclerView) findViewById(R.id.recycler_view);
     }
 
-    void init(){
+    @Override
+    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+        super.onLayout(changed, left, top, right, bottom);
+        mViewWidth = mChildView.getWidth();
+        mViewHeight = mChildView.getHeight();
+    }
+
+
+    void init() {
         context = getContext();
         final ViewConfiguration configuration = ViewConfiguration.get(context);
-        mTouchSlop = ViewConfigurationCompat.getScaledPagingTouchSlop(configuration);
+        mTouchSlop = configuration.getScaledTouchSlop();
         mMinimumVelocity = configuration.getScaledMinimumFlingVelocity();
         mMaximumVelocity = configuration.getScaledMaximumFlingVelocity();
+        mBackgroundView = new View(context);
+        mBackgroundView.setBackgroundColor(0x80000000);
+        mBackgroundView.setVisibility(GONE);
+        addView(mBackgroundView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+    }
+
+    @Override
+    public void onViewAdded(View child) {
+        super.onViewAdded(child);
+        if (child != mBackgroundView)
+            mChildView = child;
     }
 
     @Override
     public boolean onInterceptTouchEvent(MotionEvent ev) {
-        final int action = ev.getAction() & MotionEventCompat.ACTION_MASK;
+        if (mAnimationRunning)
+            return false;
+        final int action = ev.getActionMasked();
         switch (action) {
             case MotionEvent.ACTION_CANCEL | MotionEvent.ACTION_UP: {
-                //Log.i("cancel, up", "..");
-                mActivePointerId = INVALID_POINTER;
                 mIsBeingDraggedX = false;
                 mIsBeingDraggedY = false;
                 if (mVelocityTracker != null) {
@@ -74,43 +96,40 @@ public class MyLayout extends FrameLayout {
                 return false;
             }
             case MotionEvent.ACTION_DOWN: {
-                mFirstMotionX = mLastMotionX =  ev.getX();
-                mFirstMotionY = mLastMotionY = ev.getY();
+                mFirstMotionX = mLastMotionX = ev.getRawX();
+                mFirstMotionY = mLastMotionY = ev.getRawY();
                 mIsBeingDraggedX = false;
                 mIsBeingDraggedY = false;
             }
             default: { //action MOVE
-                //Log.i("move","..");
-                final int activePointerId = mActivePointerId;
-                if (activePointerId == INVALID_POINTER) {
-                    //Log.i("break","..");
-                    break;
-                }
-                //Log.i("move 2","..");
-                final int pointerIndex = MotionEventCompat.findPointerIndex(ev, activePointerId);
-                final float x = MotionEventCompat.getX(ev, pointerIndex);
+                final float x = ev.getRawX();
                 deltaX = x - mFirstMotionX;
                 final float xDiff = Math.abs(x - mLastMotionX);
-                final float y = MotionEventCompat.getY(ev, pointerIndex);
+                final float y = ev.getRawY();
                 deltaY = y - mFirstMotionY;
-                Log.i("delta Y", "" + deltaY);
                 final float yDiff = Math.abs(y - mLastMotionY);
+                mSwipingSlopX = (deltaX > 0 ? mTouchSlop : -mTouchSlop);
+                mSwipingSlopY = (deltaY > 0 ? mTouchSlop : -mTouchSlop);
 
-                if (xDiff > mTouchSlop && xDiff > yDiff) {
+                if ((xDiff) > mTouchSlop && (xDiff) / 2 > (yDiff)) {
                     mIsBeingDraggedX = true;
-                    //Log.i("intercept","!");
-                } else {
+                    mIsBeingDraggedY = false;
+                } else  if (((!recyclerView.canScrollVertically(1)) || (deltaY > 0 && !recyclerView.canScrollVertically(-1))) && yDiff > mTouchSlop && yDiff/2 > xDiff){
                     mIsBeingDraggedX = false;
-                    //Log.i("no intercept", "..");
+                    mIsBeingDraggedY = true;
                 }
-                if(mIsBeingDraggedX) {
+                else {
+                    mIsBeingDraggedY = false;
+                    mIsBeingDraggedY = false;
+                }
+                if (mIsBeingDraggedX) {
                     performDragX();
                     mLastMotionX = x;
                     mLastMotionY = y;
-                }
-                else if (deltaY < 0 && (!recyclerView.canScrollVertically(1)) || (deltaY > 0 && !recyclerView.canScrollVertically(-1))) {
-                    mIsBeingDraggedY = true;
+                } else if (mIsBeingDraggedY) {
                     performDragY();
+                    mLastMotionX = x;
+                    mLastMotionY = y;
                 }
             }
         }
@@ -125,24 +144,21 @@ public class MyLayout extends FrameLayout {
 
     @Override
     public boolean onTouchEvent(MotionEvent ev) {
-        final int action = ev.getAction();
         if (mVelocityTracker == null) {
             mVelocityTracker = VelocityTracker.obtain();
         }
         mVelocityTracker.addMovement(ev);
-        switch (action & MotionEventCompat.ACTION_MASK) {
+        switch (ev.getActionMasked()) {
             case MotionEvent.ACTION_DOWN: {
-                mFirstMotionX = mLastMotionX = ev.getX();
-                mFirstMotionY = mLastMotionY = ev.getY();
-                mActivePointerId = MotionEventCompat.getPointerId(ev, 0);
+                mFirstMotionX = mLastMotionX = ev.getRawX();
+                mFirstMotionY = mLastMotionY = ev.getRawY();
                 break;
             }
             case MotionEvent.ACTION_MOVE: {
-                if (!mIsBeingDraggedX || !mIsBeingDraggedY) {
-                    final int pointerIndex = MotionEventCompat.findPointerIndex(ev, mActivePointerId);
-                    final float x = MotionEventCompat.getX(ev, pointerIndex);
+                /*if (!mIsBeingDraggedX || !mIsBeingDraggedY) {
+                    final float x = ev.getRawX();
                     final float xDiff = Math.abs(x - mLastMotionX);
-                    final float y = MotionEventCompat.getY(ev, pointerIndex);
+                    final float y = ev.getRawY();
                     final float yDiff = Math.abs(y - mLastMotionY);
                     if (yDiff > mTouchSlop) {
                         mIsBeingDraggedY = true;
@@ -152,21 +168,21 @@ public class MyLayout extends FrameLayout {
                         mIsBeingDraggedX = true;
                         mIsBeingDraggedY = false;
                     }
-                }
+                }*/
+                if (!mIsBeingDraggedY && !mIsBeingDraggedX)
+                    return false;
                 if (mIsBeingDraggedX) {
-                    final int activePointerIndex = MotionEventCompat.findPointerIndex(ev, mActivePointerId);
-                    final float x = MotionEventCompat.getX(ev, activePointerIndex);
-                    final float y = MotionEventCompat.getY(ev, activePointerIndex);
+                    final float x = ev.getRawX();
+                    final float y = ev.getRawY();
                     deltaX = x - mFirstMotionX;
                     deltaY = y - mFirstMotionY;
                     performDragX();
                     mLastMotionX = x;
                     mLastMotionY = y;
                 }
-                if (mIsBeingDraggedY) {
-                    final int activePointerIndex = MotionEventCompat.findPointerIndex(ev, mActivePointerId);
-                    final float x = MotionEventCompat.getX(ev, activePointerIndex);
-                    final float y = MotionEventCompat.getY(ev, activePointerIndex);
+                else if (mIsBeingDraggedY) {
+                    final float x = ev.getRawX();
+                    final float y = ev.getRawY();
                     deltaX = x - mFirstMotionX;
                     deltaY = y - mFirstMotionY;
                     performDragY();
@@ -176,89 +192,192 @@ public class MyLayout extends FrameLayout {
                 break;
             }
             case MotionEvent.ACTION_UP: {
-                final int pointerIndex = MotionEventCompat.findPointerIndex(ev, mActivePointerId);
                 final VelocityTracker velocityTracker = mVelocityTracker;
                 velocityTracker.computeCurrentVelocity(1000, mMaximumVelocity);
-                xVelocity = velocityTracker.getXVelocity(mActivePointerId);
-                yVelocity = velocityTracker.getYVelocity(mActivePointerId);
-                float x = MotionEventCompat.getX(ev, pointerIndex);
-                float y = MotionEventCompat.getY(ev,pointerIndex);
+                xVelocity = velocityTracker.getXVelocity();
+                yVelocity = velocityTracker.getYVelocity();
+                float x = ev.getRawX();
+                float y = ev.getRawY();
                 deltaX = x - mFirstMotionX;
                 deltaY = y - mFirstMotionY;
+                mLastMotionY = x;
+                mLastMotionY = y;
                 if (mIsBeingDraggedX) {
                     endDragX();
                 }
-                if (mIsBeingDraggedY) {
+                else if (mIsBeingDraggedY) {
                     endDragY();
                 }
+                mVelocityTracker.recycle();
+                mVelocityTracker = null;
+                mFirstMotionX = 0;
+                mFirstMotionY = 0;
             }
             case MotionEvent.ACTION_CANCEL: {
                 if (mIsBeingDraggedX) {
                     endDragX();
                 }
-                if (mIsBeingDraggedY) {
+                else if (mIsBeingDraggedY) {
                     endDragY();
                 }
+                if (mVelocityTracker != null) {
+                    mVelocityTracker.recycle();
+                    mVelocityTracker = null;
+                }
+                mFirstMotionX = 0;
+                mFirstMotionY = 0;
             }
         }
         return true;
     }
 
     private void endDragX() {
-        if (xVelocity >= mMinimumVelocity && deltaX >= MIN_DISTANCE_FOR_FLING) {
-            //txt.setTranslationX(getWidth());
-            recyclerView.setTranslationX(getWidth());
-            //scrollView.setTranslationX(getWidth());
-            ((Activity)context).finish();
-        }
-        if(Math.abs(deltaX) <= getWidth()/2) {
-            //txt.setTranslationX(0);
-            recyclerView.setTranslationX(0);
-            //scrollView.setTranslationX(0);
-            this.setAlpha(1);
-        }
-        else {
-            //txt.setTranslationX(getWidth());
-            recyclerView.setTranslationX(getWidth());
-            //scrollView.setTranslationX(getWidth());
-            ((Activity)context).finish();
+        if (Math.abs(xVelocity) >= mMinimumVelocity && Math.abs(deltaX) >= MIN_DISTANCE_FOR_FLING) {
+            smoothScrollXToEnd();
+        } else if (Math.abs(deltaX) <= getWidth() / 2) {
+            smoothScrollXToStart();
+        } else {
+            smoothScrollXToEnd();
         }
         mIsBeingDraggedX = false;
     }
 
     private void endDragY() {
-        if (yVelocity >= mMinimumVelocity && deltaY >= MIN_DISTANCE_FOR_FLING) {
-            recyclerView.setTranslationY(getHeight());
-            ((Activity)context).finish();
+        if (Math.abs(yVelocity) >= mMinimumVelocity && Math.abs(deltaY) >= MIN_DISTANCE_FOR_FLING) {
+            smoothScrollYToEnd();
         }
-        if(Math.abs(deltaY) <= getHeight() / 2) {
-            recyclerView.setTranslationY(0);
-            //scrollView.setTranslationY(0);
-            this.setAlpha(1);
+        else if(Math.abs(deltaY) <= getHeight() / 2) {
+            smoothScrollYToStart();
         }
         else {
-            recyclerView.setTranslationY(getHeight());
-            //scrollView.setTranslationY(getHeight());
-            ((Activity)context).finish();
+            smoothScrollYToEnd();
         }
+        mIsBeingDraggedY = false;
     }
 
-    @Override
-    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
-        super.onLayout(changed, left, top, right, bottom);
-    }
 
     private void performDragX() {
-        //txt.setTranslationX(deltaX);
-        recyclerView.setTranslationX(deltaX);
-        //scrollView.setTranslationX(deltaX);
-        this.setAlpha(1-(deltaX/getWidth()));
+        mChildView.setTranslationX(deltaX - mSwipingSlopX);
+        updateBackgroundViewX(mChildView.getTranslationX());
     }
 
     private void performDragY() {
-        recyclerView.setTranslationY(deltaY);
-        //scrollView.setTranslationY(deltaY);
-        this.setAlpha(1-(deltaY/getHeight()));
+        mChildView.setTranslationY(deltaY - mSwipingSlopY);
+        updateBackgroundViewY(mChildView.getTranslationY());
+    }
+
+    void smoothScrollYToEnd() {
+        mChildView.animate().translationY(deltaY > 0 ? mViewHeight : -mViewHeight).alpha(0).setDuration(400)
+                .setUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                    @Override
+                    public void onAnimationUpdate(ValueAnimator animation) {
+                        updateBackgroundViewY(mChildView.getTranslationY());
+                    }
+                })
+                .setListener(new AnimatorListenerAdapter() {
+                    @Override
+                    public void onAnimationEnd(Animator animation) {
+                        mAnimationRunning = false;
+                        performDismiss();
+                    }
+
+                    @Override
+                    public void onAnimationStart(Animator animation) {
+                        mAnimationRunning = true;
+                    }
+                });
+    }
+
+    void smoothScrollYToStart() {
+        mChildView.animate().translationY(0).alpha(1).setDuration(400)
+                .setUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                    @Override
+                    public void onAnimationUpdate(ValueAnimator animation) {
+                        updateBackgroundViewY(mChildView.getTranslationY());
+                    }
+                })
+                .setListener(new AnimatorListenerAdapter() {
+                    @Override
+                    public void onAnimationEnd(Animator animation) {
+                        mAnimationRunning = false;
+                        updateBackgroundViewY(mViewHeight);
+                    }
+
+                    @Override
+                    public void onAnimationStart(Animator animation) {
+                        mAnimationRunning = true;
+                    }
+                });
+    }
+
+    void smoothScrollXToEnd() {
+        mChildView.animate().translationX(deltaX > 0 ? mViewWidth : -mViewWidth).alpha(0).setDuration(250)
+                .setUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                    @Override
+                    public void onAnimationUpdate(ValueAnimator animation) {
+                        updateBackgroundViewX(mChildView.getTranslationX());
+                    }
+                })
+                .setListener(new AnimatorListenerAdapter() {
+                    @Override
+                    public void onAnimationEnd(Animator animation) {
+                        mAnimationRunning = false;
+                        performDismiss();
+                    }
+
+                    @Override
+                    public void onAnimationStart(Animator animation) {
+                        mAnimationRunning = true;
+                    }
+                });
+    }
+
+    void smoothScrollXToStart() {
+        mChildView.animate().translationX(0).alpha(1).setDuration(250)
+                .setUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                    @Override
+                    public void onAnimationUpdate(ValueAnimator animation) {
+                        updateBackgroundViewX(mChildView.getTranslationX());
+                    }
+                })
+                .setListener(new AnimatorListenerAdapter() {
+                    @Override
+                    public void onAnimationEnd(Animator animation) {
+                        mAnimationRunning = false;
+                        updateBackgroundViewX(mViewWidth);
+                    }
+
+                    @Override
+                    public void onAnimationStart(Animator animation) {
+                        mAnimationRunning = true;
+                    }
+                });
+    }
+
+    private void updateBackgroundViewX(float translationX) {
+        //mBackgroundView.setVisibility(translationX == 0 ? GONE : VISIBLE);
+        mBackgroundView.setVisibility(VISIBLE);
+        if (translationX > 0)
+            mBackgroundView.setTranslationX(translationX - mViewWidth);
+        else
+            mBackgroundView.setTranslationX(translationX + mViewWidth);
+        mBackgroundView.setAlpha(Math.max(0f, Math.min(1f, 1f - Math.abs(translationX) / mViewWidth)));
+    }
+
+    private void updateBackgroundViewY(float translationY) {
+        //mBackgroundView.setVisibility(translationY == 0 ? GONE : VISIBLE);
+        mBackgroundView.setVisibility(VISIBLE);
+        if (translationY > 0)
+            mBackgroundView.setTranslationY(translationY - mViewHeight);
+        else
+            mBackgroundView.setTranslationY(translationY + mViewHeight);
+        mBackgroundView.setAlpha(Math.max(0f, Math.min(1f, 1f - Math.abs(translationY) / mViewHeight)));
+    }
+
+    private void performDismiss() {
+        mBackgroundView.setVisibility(GONE);
+        mChildView.setVisibility(GONE);
+        ((Activity) context).finish();
     }
 
     public MyLayout(@NonNull Context context) {
@@ -273,11 +392,6 @@ public class MyLayout extends FrameLayout {
 
     public MyLayout(@NonNull Context context, @Nullable AttributeSet attrs, int defStyleAttr) {
         super(context, attrs, defStyleAttr);
-        init();
-    }
-
-    public MyLayout(@NonNull Context context, @Nullable AttributeSet attrs, int defStyleAttr, int defStyleRes) {
-        super(context, attrs, defStyleAttr, defStyleRes);
         init();
     }
 }
