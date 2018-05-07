@@ -7,8 +7,13 @@ import android.app.Activity;
 import android.content.Context;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.v4.view.NestedScrollingParent;
+import android.support.v4.view.NestedScrollingParentHelper;
+import android.support.v4.view.ViewCompat;
+import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.view.MotionEvent;
 import android.view.VelocityTracker;
 import android.view.View;
@@ -16,17 +21,12 @@ import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
-public class MyLayout extends FrameLayout {
+public class MyLayout extends FrameLayout implements NestedScrollingParent {
 
-    /**
-     * Position of the last motion event.
-     */
     private float mFirstMotionX;
     private float mLastMotionX;
     private float mFirstMotionY;
     private float mLastMotionY;
-    private float deltaX;
-    private float deltaY;
     private static final int MIN_DISTANCE_FOR_FLING = 50;
     private VelocityTracker mVelocityTracker;
     float xVelocity;
@@ -38,18 +38,21 @@ public class MyLayout extends FrameLayout {
     private int mTouchSlop;
     private int mSwipingSlopX;
     private int mSwipingSlopY;
-    private RecyclerView recyclerView;
-    private View mChildView;
+    private RecyclerView mChildView;
     private Context context;
     private View mBackgroundView;
     private int mViewWidth = 1;
     private int mViewHeight = 1;
     private boolean mAnimationRunning = false;
+    private final NestedScrollingParentHelper parentHelper;
+    private float myDyUnconsumed = 0;
+    private float myDyConsumed = 0;
+
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
-        recyclerView = (RecyclerView) findViewById(R.id.recycler_view);
+        mChildView = (RecyclerView) findViewById(R.id.recycler_view);
     }
 
     @Override
@@ -58,7 +61,6 @@ public class MyLayout extends FrameLayout {
         mViewWidth = mChildView.getWidth();
         mViewHeight = mChildView.getHeight();
     }
-
 
     void init() {
         context = getContext();
@@ -70,14 +72,13 @@ public class MyLayout extends FrameLayout {
         mBackgroundView.setBackgroundColor(0x80000000);
         mBackgroundView.setVisibility(GONE);
         addView(mBackgroundView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
     }
 
     @Override
     public void onViewAdded(View child) {
         super.onViewAdded(child);
         if (child != mBackgroundView)
-            mChildView = child;
+            mChildView = (RecyclerView) child;
     }
 
     @Override
@@ -93,6 +94,8 @@ public class MyLayout extends FrameLayout {
                     mVelocityTracker.recycle();
                     mVelocityTracker = null;
                 }
+                mFirstMotionY = 0;
+                mFirstMotionX = 0;
                 return false;
             }
             case MotionEvent.ACTION_DOWN: {
@@ -103,18 +106,17 @@ public class MyLayout extends FrameLayout {
             }
             default: { //action MOVE
                 final float x = ev.getRawX();
-                deltaX = x - mFirstMotionX;
+                final float deltaX = x - mFirstMotionX;
                 final float xDiff = Math.abs(x - mLastMotionX);
                 final float y = ev.getRawY();
-                deltaY = y - mFirstMotionY;
+                final float deltaY = y - mFirstMotionY;
                 final float yDiff = Math.abs(y - mLastMotionY);
                 mSwipingSlopX = (deltaX > 0 ? mTouchSlop : -mTouchSlop);
                 mSwipingSlopY = (deltaY > 0 ? mTouchSlop : -mTouchSlop);
-
                 if ((xDiff) > mTouchSlop && (xDiff) / 2 > (yDiff)) {
                     mIsBeingDraggedX = true;
                     mIsBeingDraggedY = false;
-                } else  if (((!recyclerView.canScrollVertically(1)) || (deltaY > 0 && !recyclerView.canScrollVertically(-1))) && yDiff > mTouchSlop && yDiff/2 > xDiff){
+                } else  if (((deltaY < 0 && !mChildView.canScrollVertically(1)) || (deltaY > 0 && !mChildView.canScrollVertically(-1))) && yDiff > mTouchSlop && yDiff/2 > xDiff){
                     mIsBeingDraggedX = false;
                     mIsBeingDraggedY = true;
                 }
@@ -122,12 +124,13 @@ public class MyLayout extends FrameLayout {
                     mIsBeingDraggedY = false;
                     mIsBeingDraggedY = false;
                 }
+
                 if (mIsBeingDraggedX) {
-                    performDragX();
+                    performDragX(deltaX);
                     mLastMotionX = x;
                     mLastMotionY = y;
                 } else if (mIsBeingDraggedY) {
-                    performDragY();
+                    performDragY(deltaY);
                     mLastMotionX = x;
                     mLastMotionY = y;
                 }
@@ -155,40 +158,21 @@ public class MyLayout extends FrameLayout {
                 break;
             }
             case MotionEvent.ACTION_MOVE: {
-                /*if (!mIsBeingDraggedX || !mIsBeingDraggedY) {
-                    final float x = ev.getRawX();
-                    final float xDiff = Math.abs(x - mLastMotionX);
-                    final float y = ev.getRawY();
-                    final float yDiff = Math.abs(y - mLastMotionY);
-                    if (yDiff > mTouchSlop) {
-                        mIsBeingDraggedY = true;
-                        mIsBeingDraggedX = false;
-                    }
-                    if (xDiff > mTouchSlop && xDiff > yDiff) {
-                        mIsBeingDraggedX = true;
-                        mIsBeingDraggedY = false;
-                    }
-                }*/
                 if (!mIsBeingDraggedY && !mIsBeingDraggedX)
                     return false;
+
+                final float x = ev.getRawX();
+                final float y = ev.getRawY();
+                final float deltaX = x - mFirstMotionX;
+                final float deltaY = y - mFirstMotionY;
                 if (mIsBeingDraggedX) {
-                    final float x = ev.getRawX();
-                    final float y = ev.getRawY();
-                    deltaX = x - mFirstMotionX;
-                    deltaY = y - mFirstMotionY;
-                    performDragX();
-                    mLastMotionX = x;
-                    mLastMotionY = y;
+                    performDragX(deltaX);
                 }
                 else if (mIsBeingDraggedY) {
-                    final float x = ev.getRawX();
-                    final float y = ev.getRawY();
-                    deltaX = x - mFirstMotionX;
-                    deltaY = y - mFirstMotionY;
-                    performDragY();
-                    mLastMotionX = x;
-                    mLastMotionY = y;
+                    performDragY(deltaY);
                 }
+                mLastMotionX = x;
+                mLastMotionY = y;
                 break;
             }
             case MotionEvent.ACTION_UP: {
@@ -198,15 +182,15 @@ public class MyLayout extends FrameLayout {
                 yVelocity = velocityTracker.getYVelocity();
                 float x = ev.getRawX();
                 float y = ev.getRawY();
-                deltaX = x - mFirstMotionX;
-                deltaY = y - mFirstMotionY;
+                final float deltaX = x - mFirstMotionX;
+                final float deltaY = y - mFirstMotionY;
                 mLastMotionY = x;
                 mLastMotionY = y;
                 if (mIsBeingDraggedX) {
-                    endDragX();
+                    endDragX(deltaX);
                 }
                 else if (mIsBeingDraggedY) {
-                    endDragY();
+                    endDragY(deltaY);
                 }
                 mVelocityTracker.recycle();
                 mVelocityTracker = null;
@@ -214,11 +198,23 @@ public class MyLayout extends FrameLayout {
                 mFirstMotionY = 0;
             }
             case MotionEvent.ACTION_CANCEL: {
+                if(mVelocityTracker != null) {
+                    final VelocityTracker velocityTracker = mVelocityTracker;
+                    velocityTracker.computeCurrentVelocity(1000, mMaximumVelocity);
+                    xVelocity = velocityTracker.getXVelocity();
+                    yVelocity = velocityTracker.getYVelocity();
+                }
+                float x = ev.getRawX();
+                float y = ev.getRawY();
+                final float deltaX = x - mFirstMotionX;
+                final float deltaY = y - mFirstMotionY;
+                mLastMotionY = x;
+                mLastMotionY = y;
                 if (mIsBeingDraggedX) {
-                    endDragX();
+                    endDragX(deltaX);
                 }
                 else if (mIsBeingDraggedY) {
-                    endDragY();
+                    endDragY(deltaY);
                 }
                 if (mVelocityTracker != null) {
                     mVelocityTracker.recycle();
@@ -231,42 +227,43 @@ public class MyLayout extends FrameLayout {
         return true;
     }
 
-    private void endDragX() {
+    private void endDragX(float deltaX) {
         if (Math.abs(xVelocity) >= mMinimumVelocity && Math.abs(deltaX) >= MIN_DISTANCE_FOR_FLING) {
-            smoothScrollXToEnd();
+            smoothScrollXToEnd(deltaX);
         } else if (Math.abs(deltaX) <= getWidth() / 2) {
             smoothScrollXToStart();
         } else {
-            smoothScrollXToEnd();
+            smoothScrollXToEnd(deltaX);
         }
         mIsBeingDraggedX = false;
     }
 
-    private void endDragY() {
-        if (Math.abs(yVelocity) >= mMinimumVelocity && Math.abs(deltaY) >= MIN_DISTANCE_FOR_FLING) {
-            smoothScrollYToEnd();
+    private void endDragY(float deltaY) {
+        Log.i("deltaY", deltaY + ", " + (getHeight()/2));
+        /*if (Math.abs(yVelocity) >= mMinimumVelocity && Math.abs(deltaY) >= MIN_DISTANCE_FOR_FLING) {
+            smoothScrollYToEnd(deltaY);
         }
-        else if(Math.abs(deltaY) <= getHeight() / 2) {
+        else*/ if(Math.abs(deltaY) <= getHeight() / 2) {
             smoothScrollYToStart();
         }
         else {
-            smoothScrollYToEnd();
+            smoothScrollYToEnd(deltaY);
         }
         mIsBeingDraggedY = false;
     }
 
-
-    private void performDragX() {
+    private void performDragX(float deltaX) {
         mChildView.setTranslationX(deltaX - mSwipingSlopX);
         updateBackgroundViewX(mChildView.getTranslationX());
     }
 
-    private void performDragY() {
+    private void performDragY(float deltaY) {
         mChildView.setTranslationY(deltaY - mSwipingSlopY);
         updateBackgroundViewY(mChildView.getTranslationY());
     }
 
-    void smoothScrollYToEnd() {
+    void smoothScrollYToEnd(float deltaY) {
+        Log.i("smooth",""+deltaY);
         mChildView.animate().translationY(deltaY > 0 ? mViewHeight : -mViewHeight).alpha(0).setDuration(400)
                 .setUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
                     @Override
@@ -310,7 +307,7 @@ public class MyLayout extends FrameLayout {
                 });
     }
 
-    void smoothScrollXToEnd() {
+    void smoothScrollXToEnd(float deltaX) {
         mChildView.animate().translationX(deltaX > 0 ? mViewWidth : -mViewWidth).alpha(0).setDuration(250)
                 .setUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
                     @Override
@@ -380,18 +377,93 @@ public class MyLayout extends FrameLayout {
         ((Activity) context).finish();
     }
 
+    private static boolean isRecyclerViewScrolledToTop(RecyclerView rv) {
+        final LinearLayoutManager lm = (LinearLayoutManager) rv.getLayoutManager();
+        return lm.findFirstVisibleItemPosition() == 0
+                && lm.findViewByPosition(0).getTop() == 0;
+    }
+
+    private static boolean isRecyclerViewOnTop(RecyclerView rv) {
+        return rv.getTranslationY() == 0;
+    }
+
+    @Override
+    public void onNestedScroll(View target, int dxConsumed, int dyConsumed, int dxUnconsumed, int dyUnconsumed) {
+        Log.i("dy","consumed: " + dyConsumed + ", dyUncomsumed: " + dyUnconsumed);
+
+        final RecyclerView recyclerView = (RecyclerView) target;
+        if(dyUnconsumed < 0  && isRecyclerViewScrolledToTop(recyclerView)) {
+            myDyUnconsumed -= dyUnconsumed;
+
+            //Log.i("myDyUnconsumed", "" + myDyUnconsumed);
+            performDragY(myDyUnconsumed);
+            myDyConsumed = recyclerView.getTranslationY();
+        }
+        if(!isRecyclerViewOnTop(recyclerView) && dyConsumed != 0) {
+            recyclerView.scrollToPosition(0);
+            myDyConsumed -= 2*dyConsumed;
+            performDragY(myDyConsumed);
+            myDyUnconsumed = recyclerView.getTranslationY();
+            if(recyclerView.getTranslationY() < 0) {
+                recyclerView.setTranslationY(0);
+                stopNestedScroll();
+            }
+        }
+    }
+
+    @Override
+    public void onNestedPreScroll(View target, int dx, int dy, int[] consumed) {
+        super.onNestedPreScroll(target, dx, dy, consumed);
+    }
+
+    @Override
+    public int getNestedScrollAxes() {
+        return parentHelper.getNestedScrollAxes();
+    }
+
     public MyLayout(@NonNull Context context) {
         super(context);
+        parentHelper = new NestedScrollingParentHelper(this);
         init();
     }
 
     public MyLayout(@NonNull Context context, @Nullable AttributeSet attrs) {
         super(context, attrs);
+        parentHelper = new NestedScrollingParentHelper(this);
         init();
     }
 
     public MyLayout(@NonNull Context context, @Nullable AttributeSet attrs, int defStyleAttr) {
         super(context, attrs, defStyleAttr);
+        parentHelper = new NestedScrollingParentHelper(this);
         init();
+    }
+
+    @Override
+    public boolean onStartNestedScroll(View child, View target, int nestedScrollAxes) {
+        /*if(!isRecyclerViewScrolledToTop((RecyclerView) child) && nestedScrollAxes == ViewCompat.SCROLL_AXIS_VERTICAL) {
+            mIsBeingDraggedY = false;
+            return true;
+        }
+        else
+            return false;*/
+        return true;
+    }
+
+    @Override
+    public void onNestedScrollAccepted(View child, View target, int axes) {
+        //parentHelper.onNestedScrollAccepted(child, target, axes);
+        startNestedScroll(ViewCompat.SCROLL_AXIS_VERTICAL);
+    }
+
+    @Override
+    public void onStopNestedScroll(View child) {
+        Log.i("stop", "...");
+        if(!mIsBeingDraggedY) {
+            endDragY(myDyUnconsumed);
+        }
+        myDyUnconsumed = 0;
+        myDyConsumed = 0;
+        stopNestedScroll();
     }
 }
